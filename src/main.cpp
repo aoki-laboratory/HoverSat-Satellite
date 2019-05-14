@@ -19,7 +19,7 @@
 
 //Define
 //------------------------------------------------------------------//
-#define   TIMER_INTERRUPT   10 // ms
+#define   TIMER_INTERRUPT   100 // ms
 #define   LCD
 #define   STEPMOTOR_I2C_ADDR 0x70
 // #define  STEPMOTOR_I2C_ADDR 0x71
