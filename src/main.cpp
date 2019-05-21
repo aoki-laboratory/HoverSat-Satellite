@@ -84,6 +84,7 @@ void SendCommand(byte addr, char *c) {
 void setup() {
 
   M5.begin();
+  Wire.begin();
   M5.Lcd.clear();
   M5.Lcd.drawJpgFile(SD, "/Image/Picture.jpg");
   M5.Lcd.setTextColor(BLACK);
@@ -125,6 +126,7 @@ void loop() {
     
   }
 
+
   bts.println(counter);
   counter++;
   delay(100);
@@ -163,8 +165,8 @@ void loop() {
       if(hover_val>0) hover_val-=5;
       DuctedFan.write(hover_val);
   } else if (M5.BtnA.pressedFor(700)) {
-    SendCommand(STEPMOTOR_I2C_ADDR, "G1 X100 F1000");
-    SendCommand(STEPMOTOR_I2C_ADDR, "G1 X0 F400");
+    SendCommand(STEPMOTOR_I2C_ADDR, "G1 X20 F500");
+    SendCommand(STEPMOTOR_I2C_ADDR, "G1 X0 F100");
   }
 
  // Timer Interrupt
