@@ -127,10 +127,10 @@ void loop() {
   }
 
 
+  bts.print(interruptCounter);
+  bts.print(", ");
   bts.println(counter);
-  counter++;
-  delay(100);
-
+  
   // Get Data from Module.
   Wire.requestFrom(STEPMOTOR_I2C_ADDR, 1);
   if (Wire.available() > 0) {
@@ -189,6 +189,10 @@ void loop() {
         M5.Lcd.setCursor(100, 105);
         M5.Lcd.println("Disable");
       }
+    break;
+
+    case 2:
+      counter++;
       break;
     
     case 10:
