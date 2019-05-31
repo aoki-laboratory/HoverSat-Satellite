@@ -19,10 +19,13 @@
 
 //Define
 //------------------------------------------------------------------//
-#define   TIMER_INTERRUPT   10 // ms
+#define   TIMER_INTERRUPT   100 // ms
 #define   LCD
 #define   STEPMOTOR_I2C_ADDR 0x70
 // #define  STEPMOTOR_I2C_ADDR 0x71
+#define   DAT 5
+#define   CLK 2
+
 
 //Global
 //------------------------------------------------------------------//
@@ -35,6 +38,10 @@ BluetoothSerial bts;
 
 // MPU9250
 MPU9250 IMU; 
+
+// HX711 Offset
+float offset_val = 0;
+float LoadCell_val = 0;
 
 // DuctedFan
 static const int DuctedFanPin = 15;
@@ -78,6 +85,75 @@ void SendCommand(byte addr, char *c) {
   Wire.endTransmission();
 }
 
+// Read HX711
+//------------------------------------------------------------------//
+float Read(void){
+    long sum = 0;
+    for (int i = 0; i < 30; i++) {
+        long data=0;
+        while(digitalRead(DAT)!=0);
+        for(char i=0;i<24;i++) {
+            digitalWrite(CLK,1);
+            delayMicroseconds(1);
+            digitalWrite(CLK,0);
+            delayMicroseconds(1);
+            data = (data<<1)|(digitalRead(DAT));
+        }
+        digitalWrite(CLK,1); //gain=128
+        delayMicroseconds(1);
+        digitalWrite(CLK,0);
+        delayMicroseconds(1);
+        data = data^0x800000;
+        sum += data;
+    }
+    float data = sum /30;
+    float volt;float gram;
+    volt =data*(4.2987/16777216.0/128);
+    gram=volt/(0.001*4.2987/20000.0);
+    return gram-offset_val;
+}
+
+
+
+// Timer Interrupt
+//------------------------------------------------------------------//
+void Timer_Interrupt( void ){
+  if (interruptCounter > 0) {
+
+    portENTER_CRITICAL(&timerMux);
+    interruptCounter--;
+    portEXIT_CRITICAL(&timerMux);
+
+    totalInterruptCounter++;
+
+    iTimer10++;
+    switch( iTimer10 ) {
+    case 1:
+      if(hover_flag) {
+        M5.Lcd.fillScreen(BLACK);
+        M5.Lcd.setCursor(140, 105);
+        M5.Lcd.println(hover_val);
+      } else {
+        M5.Lcd.setCursor(100, 105);
+        M5.Lcd.println("Disable");
+      }
+    break;
+
+    case 2:
+      counter++;
+      break;
+    
+    case 10:
+      LoadCell_val = Read();
+      iTimer10 = 0;
+      break;
+
+    }
+
+  }
+}
+
+
 
 //Setup
 //------------------------------------------------------------------//
@@ -108,15 +184,23 @@ void setup() {
   M5.Lcd.setTextSize(3);
   M5.Lcd.setTextColor(GREEN ,BLACK);
   M5.Lcd.fillScreen(BLACK);
-  
 
+  pinMode(CLK, OUTPUT);
+  pinMode(DAT, INPUT);
+  offset_val = Read();
+
+  SendCommand(STEPMOTOR_I2C_ADDR, "G91");
+  
 }
 
 
 //Main
 //------------------------------------------------------------------//
 void loop() {
-   
+
+  Timer_Interrupt();
+
+  
   switch (pattern) {
     case 0:
       break;
@@ -165,42 +249,9 @@ void loop() {
       if(hover_val>0) hover_val-=5;
       DuctedFan.write(hover_val);
   } else if (M5.BtnA.pressedFor(700)) {
-    SendCommand(STEPMOTOR_I2C_ADDR, "G1 X20 F500");
-    SendCommand(STEPMOTOR_I2C_ADDR, "G1 X0 F100");
-  }
-
- // Timer Interrupt
-  if (interruptCounter > 0) {
-
-    portENTER_CRITICAL(&timerMux);
-    interruptCounter--;
-    portEXIT_CRITICAL(&timerMux);
-
-    totalInterruptCounter++;
-
-    iTimer10++;
-    switch( iTimer10 ) {
-    case 1:
-      if(hover_flag) {
-        M5.Lcd.fillScreen(BLACK);
-        M5.Lcd.setCursor(140, 105);
-        M5.Lcd.println(hover_val);
-      } else {
-        M5.Lcd.setCursor(100, 105);
-        M5.Lcd.println("Disable");
-      }
-    break;
-
-    case 2:
-      counter++;
-      break;
-    
-    case 10:
-      iTimer10 = 0;
-      break;
-
-    }
-
+    SendCommand(STEPMOTOR_I2C_ADDR, "G1 X10 F500");
+  }  else if (M5.BtnB.pressedFor(700)) {
+    SendCommand(STEPMOTOR_I2C_ADDR, "G1 X-10 F500");
   }
 
 }
