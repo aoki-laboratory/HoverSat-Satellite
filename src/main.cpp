@@ -19,12 +19,16 @@
 
 //Define
 //------------------------------------------------------------------//
-#define   TIMER_INTERRUPT   100 // ms
+#define   TIMER_INTERRUPT   10 // ms
 #define   LCD
 #define   STEPMOTOR_I2C_ADDR 0x70
 // #define  STEPMOTOR_I2C_ADDR 0x71
-#define   DAT 5
-#define   CLK 2
+
+#define HX711_DOUT  2
+#define HX711_SCLK  5
+#define OUT_VOL     0.0007f
+#define LOAD        500.0f
+
 
 
 //Global
@@ -39,9 +43,9 @@ BluetoothSerial bts;
 // MPU9250
 MPU9250 IMU; 
 
-// HX711 Offset
-float offset_val = 0;
-float LoadCell_val = 0;
+// HX711
+float hx711_offset;
+float hx711_data;
 
 // DuctedFan
 static const int DuctedFanPin = 15;
@@ -56,103 +60,19 @@ int iTimer10;
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
-void IRAM_ATTR onTimer() {
-  portENTER_CRITICAL_ISR(&timerMux);
-  interruptCounter++;
-  portEXIT_CRITICAL_ISR(&timerMux);
- }
 
-
- 
-//SendByte
+//Global
 //------------------------------------------------------------------//
-void SendByte(byte addr, byte b) {
-  Wire.beginTransmission(addr);
-  Wire.write(b);
-  Wire.endTransmission();
-}
+void AE_HX711_Init(void);
+void AE_HX711_Reset(void);
+long AE_HX711_Read(void);
+long AE_HX711_Averaging(long adc,char num);
+float AE_HX711_getGram(char num);
 
-//SendCommand
-//------------------------------------------------------------------//
-void SendCommand(byte addr, char *c) {
-  Wire.beginTransmission(addr);
-  while ((*c) != 0) {
-    Wire.write(*c);
-    c++;
-  }
-  Wire.write(0x0d);
-  Wire.write(0x0a);
-  Wire.endTransmission();
-}
-
-// Read HX711
-//------------------------------------------------------------------//
-float Read(void){
-    long sum = 0;
-    for (int i = 0; i < 30; i++) {
-        long data=0;
-        while(digitalRead(DAT)!=0);
-        for(char i=0;i<24;i++) {
-            digitalWrite(CLK,1);
-            delayMicroseconds(1);
-            digitalWrite(CLK,0);
-            delayMicroseconds(1);
-            data = (data<<1)|(digitalRead(DAT));
-        }
-        digitalWrite(CLK,1); //gain=128
-        delayMicroseconds(1);
-        digitalWrite(CLK,0);
-        delayMicroseconds(1);
-        data = data^0x800000;
-        sum += data;
-    }
-    float data = sum /30;
-    float volt;float gram;
-    volt =data*(4.2987/16777216.0/128);
-    gram=volt/(0.001*4.2987/20000.0);
-    return gram-offset_val;
-}
-
-
-
-// Timer Interrupt
-//------------------------------------------------------------------//
-void Timer_Interrupt( void ){
-  if (interruptCounter > 0) {
-
-    portENTER_CRITICAL(&timerMux);
-    interruptCounter--;
-    portEXIT_CRITICAL(&timerMux);
-
-    totalInterruptCounter++;
-
-    iTimer10++;
-    switch( iTimer10 ) {
-    case 1:
-      if(hover_flag) {
-        M5.Lcd.fillScreen(BLACK);
-        M5.Lcd.setCursor(140, 105);
-        M5.Lcd.println(hover_val);
-      } else {
-        M5.Lcd.setCursor(100, 105);
-        M5.Lcd.println("Disable");
-      }
-    break;
-
-    case 2:
-      counter++;
-      break;
-    
-    case 10:
-      LoadCell_val = Read();
-      iTimer10 = 0;
-      break;
-
-    }
-
-  }
-}
-
+void IRAM_ATTR onTimer(void);
+void SendByte(byte addr, byte b);
+void SendCommand(byte addr, char *c);
+void Timer_Interrupt( void );
 
 
 //Setup
@@ -185,11 +105,9 @@ void setup() {
   M5.Lcd.setTextColor(GREEN ,BLACK);
   M5.Lcd.fillScreen(BLACK);
 
-  pinMode(CLK, OUTPUT);
-  pinMode(DAT, INPUT);
-  offset_val = Read();
-
-  SendCommand(STEPMOTOR_I2C_ADDR, "G91");
+  AE_HX711_Init();
+  AE_HX711_Reset();
+  hx711_offset = AE_HX711_getGram(30); 
   
 }
 
@@ -213,7 +131,7 @@ void loop() {
 
   bts.print(interruptCounter);
   bts.print(", ");
-  bts.println(counter);
+  bts.println(hx711_data);
   
   // Get Data from Module.
   Wire.requestFrom(STEPMOTOR_I2C_ADDR, 1);
@@ -256,3 +174,143 @@ void loop() {
 
 }
 
+
+// Timer Interrupt
+//------------------------------------------------------------------//
+void Timer_Interrupt( void ){
+  if (interruptCounter > 0) {
+
+    portENTER_CRITICAL(&timerMux);
+    interruptCounter--;
+    portEXIT_CRITICAL(&timerMux);
+
+    totalInterruptCounter++;
+
+    iTimer10++;
+    switch( iTimer10 ) {
+    case 1:
+      if(hover_flag) {
+        M5.Lcd.fillScreen(BLACK);
+        M5.Lcd.setCursor(140, 105);
+        M5.Lcd.println(hover_val);
+      } else {
+        M5.Lcd.setCursor(100, 105);
+        M5.Lcd.println("Disable");
+      }
+    break;
+
+    case 2:
+      hx711_data = AE_HX711_getGram(5) - hx711_offset;
+      break;
+    
+    case 10:
+      iTimer10 = 0;
+      break;
+
+    }
+
+  }
+}
+
+
+// IRAM
+//------------------------------------------------------------------//
+void IRAM_ATTR onTimer() {
+  portENTER_CRITICAL_ISR(&timerMux);
+  interruptCounter++;
+  portEXIT_CRITICAL_ISR(&timerMux);
+ }
+
+  
+//SendByte
+//------------------------------------------------------------------//
+void SendByte(byte addr, byte b) {
+  Wire.beginTransmission(addr);
+  Wire.write(b);
+  Wire.endTransmission();
+}
+
+//SendCommand
+//------------------------------------------------------------------//
+void SendCommand(byte addr, char *c) {
+  Wire.beginTransmission(addr);
+  while ((*c) != 0) {
+    Wire.write(*c);
+    c++;
+  }
+  Wire.write(0x0d);
+  Wire.write(0x0a);
+  Wire.endTransmission();
+}
+
+//AE HX711 Init
+//------------------------------------------------------------------//
+void AE_HX711_Init(void)
+{
+  pinMode(HX711_SCLK, OUTPUT);
+  pinMode(HX711_DOUT, INPUT);
+}
+
+//AE HX711 Reset
+//------------------------------------------------------------------//
+void AE_HX711_Reset(void)
+{
+  digitalWrite(HX711_SCLK,1);
+  delayMicroseconds(100);
+  digitalWrite(HX711_SCLK,0);
+  delayMicroseconds(100); 
+}
+
+//AE HX711 Read
+//------------------------------------------------------------------//
+long AE_HX711_Read(void)
+{
+  long data=0;
+  while(digitalRead(HX711_DOUT)!=0);
+  delayMicroseconds(10);
+  for(int i=0;i<24;i++)
+  {
+    digitalWrite(HX711_SCLK,1);
+    delayMicroseconds(5);
+    digitalWrite(HX711_SCLK,0);
+    delayMicroseconds(5);
+    data = (data<<1)|(digitalRead(HX711_DOUT));
+  }
+  //Serial.println(data,HEX);   
+  digitalWrite(HX711_SCLK,1);
+  delayMicroseconds(10);
+  digitalWrite(HX711_SCLK,0);
+  delayMicroseconds(10);
+  return data^0x800000; 
+}
+
+
+long AE_HX711_Averaging(long adc,char num)
+{
+  long sum = 0;
+  for (int i = 0; i < num; i++) sum += AE_HX711_Read();
+  return sum / num;
+}
+
+float AE_HX711_getGram(char num)
+{
+  #define HX711_R1  20000.0f
+  #define HX711_R2  8200.0f
+  #define HX711_VBG 1.25f
+  #define HX711_AVDD      4.2987f//(HX711_VBG*((HX711_R1+HX711_R2)/HX711_R2))
+  #define HX711_ADC1bit   HX711_AVDD/16777216 //16777216=(2^24)
+  #define HX711_PGA 128
+  #define HX711_SCALE     (OUT_VOL * HX711_AVDD / LOAD *HX711_PGA)
+  
+  float data;
+
+  data = AE_HX711_Averaging(AE_HX711_Read(),num)*HX711_ADC1bit; 
+  //Serial.println( HX711_AVDD);   
+  //Serial.println( HX711_ADC1bit);   
+  //Serial.println( HX711_SCALE);   
+  //Serial.println( data);   
+  data =  data / HX711_SCALE;
+
+
+  return data;
+}
